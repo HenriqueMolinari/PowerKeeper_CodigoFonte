@@ -21,59 +21,72 @@ class Leitura {
 
   factory Leitura.fromFirebase(Map<String, dynamic> data, String id) {
     DateTime timestamp;
+    double tensao = 0.0;
+    double corrente = 0.0;
+    double potencia = 0.0;
+    double consumoKwh = 0.0;
+    double custo = 0.0;
 
     try {
+      // 🔥 REMOVA ESTES DOIS PRINTS:
+      // print('🔍 Processando leitura $id: $data'); // DEBUG
+      // print('✅ Leitura $id processada: $corrente A, $potencia W, $consumoKwh kWh'); // DEBUG
+
+      // Processar timestamp
       final timestampData = data['timestamp'];
-
-      if (timestampData == null) {
-        timestamp = DateTime.now().toUtc();
-      } else if (timestampData is String && timestampData.contains('T')) {
-        try {
+      if (timestampData != null) {
+        if (timestampData is int) {
+          timestamp =
+              DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
+        } else if (timestampData is String) {
           timestamp = DateTime.parse(timestampData).toUtc();
-        } catch (e) {
-          timestamp = DateTime.now().toUtc();
-        }
-      } else if (timestampData is String && timestampData.contains('/')) {
-        try {
-          final parts = timestampData.split(' ');
-          final dateParts = parts[0].split('/');
-          final timeParts = parts[1].split(':');
-
-          timestamp = DateTime(
-            int.parse(dateParts[2]),
-            int.parse(dateParts[1]),
-            int.parse(dateParts[0]),
-            int.parse(timeParts[0]),
-            int.parse(timeParts[1]),
-            int.parse(timeParts[2]),
-          ).toUtc();
-        } catch (e) {
-          timestamp = DateTime.now().toUtc();
-        }
-      } else if (timestampData is int || timestampData is double) {
-        try {
-          timestamp = DateTime.fromMillisecondsSinceEpoch(timestampData.toInt(),
-              isUtc: true);
-        } catch (e) {
+        } else {
           timestamp = DateTime.now().toUtc();
         }
       } else {
         timestamp = DateTime.now().toUtc();
       }
+
+      // Processar valores numéricos (que podem vir como strings)
+      tensao = _parseDouble(data['tensao']);
+      corrente = _parseDouble(data['corrente']);
+      potencia = _parseDouble(data['potencia']);
+
+      // Consumo pode vir como consumo_total_Wh (Watts-hora) - converter para kWh
+      final consumoWh =
+          _parseDouble(data['consumo_total_Wh'] ?? data['consumokWh']);
+      consumoKwh = consumoWh / 1000.0; // Converter Wh para kWh
+
+      custo = _parseDouble(data['custo_total_reais'] ?? data['custo']);
     } catch (e) {
+      print('❌ Erro ao processar dados da leitura $id: $e');
+      print('📋 Dados problemáticos: $data');
       timestamp = DateTime.now().toUtc();
     }
 
     return Leitura(
       int.tryParse(id) ?? DateTime.now().millisecondsSinceEpoch,
       timestamp,
-      (data['tensao'] ?? 0.0).toDouble(),
-      (data['corrente'] ?? 0.0).toDouble(),
-      (data['potencia'] ?? 0.0).toDouble(),
-      (data['consumokWh'] ?? 0.0).toDouble(),
-      (data['custo'] ?? 0.0).toDouble(),
-      (data['sensor_idSensor'] ?? 1).toInt(),
+      tensao,
+      corrente,
+      potencia,
+      consumoKwh,
+      custo,
+      1, // sensor_id padrão
     );
+  }
+
+  // Método auxiliar para parsear double de strings
+  static double _parseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) {
+      // Remove aspas e converte
+      final cleanValue = value.replaceAll('"', '').trim();
+      return double.tryParse(cleanValue) ?? 0.0;
+    }
+    return 0.0;
   }
 
   int get id => _id;
@@ -92,10 +105,10 @@ class Leitura {
     print('─' * 40);
     print('ID: $_id');
     print('Timestamp: ${_formatarData(_timestamp)}');
-    print('Tensão: ${_tensao.toStringAsFixed(2)} V');
-    print('Corrente: ${_corrente.toStringAsFixed(2)} A');
+    print('Tensão: ${_tensao.toStringAsFixed(1)} V');
+    print('Corrente: ${_corrente.toStringAsFixed(3)} A');
     print('Potência: ${_potencia.toStringAsFixed(2)} W');
-    print('Consumo: ${_consumoKwh.toStringAsFixed(4)} kWh');
+    print('Consumo: ${_consumoKwh.toStringAsFixed(6)} kWh');
     print('Custo: R\$ ${_custo.toStringAsFixed(4)}');
     print('Sensor ID: $_sensorId');
     print('─' * 40);
@@ -109,6 +122,6 @@ class Leitura {
 
   @override
   String toString() {
-    return 'Leitura $id - ${_formatarData(_timestamp)} - ${_potencia.toStringAsFixed(1)}W - ${_consumoKwh.toStringAsFixed(3)}kWh - R\$${_custo.toStringAsFixed(2)}';
+    return 'Leitura $id - ${_formatarData(_timestamp)} - ${_corrente.toStringAsFixed(3)}A - ${_potencia.toStringAsFixed(1)}W - ${_consumoKwh.toStringAsFixed(6)}kWh';
   }
 }

@@ -16,7 +16,6 @@ class Menu {
   // 🔥 CONFIGURAÇÕES FIREBASE - POWERKEEPER
   static const String _baseUrl =
       'powerkeeper-c708c-default-rtdb.firebaseio.com';
-  static const String _authToken = 'AIzaSyBlnGna87rS4nqEkwYPX1cxjDwvwVsTcFI';
 
   // Listas locais
   final List<Empresa> _empresas = [];
@@ -47,37 +46,87 @@ class Menu {
   Future<void> _carregarLeiturasFirebase() async {
     try {
       print('📡 Buscando leituras no Firebase...');
+      _leituras.clear();
 
-      final url = Uri.https(_baseUrl, '/leituras.json', {'auth': _authToken});
+      // 🔄 PRIMEIRO: Buscar dados atuais
+      await _carregarDadosAtuais();
+
+      // 🔄 SEGUNDO: Buscar histórico de leituras
+      await _carregarHistoricoLeituras();
+
+      print('✅ Total de leituras carregadas: ${_leituras.length}');
+    } catch (e) {
+      print('❌ Erro de conexão com Firebase: $e');
+    }
+  }
+
+  Future<void> _carregarDadosAtuais() async {
+    try {
+      final url = Uri.https(_baseUrl, '/monitor/dados_atuais.json');
       final response = await http.get(url);
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _leituras.clear();
+        final dados = json.decode(response.body);
 
-        if (data != null && data is Map) {
-          data.forEach((key, value) {
-            try {
-              if (value is Map<String, dynamic>) {
-                final leitura = Leitura.fromFirebase(value, key);
-                _leituras.add(leitura);
-                print(
-                    '📥 Leitura carregada: ${leitura.potencia}W - ${leitura.consumoKwh}kWh');
-              }
-            } catch (e) {
-              print('❌ Erro ao processar leitura $key: $e');
-            }
-          });
-
-          print('✅ ${_leituras.length} leituras carregadas do Firebase');
-        } else {
-          print('ℹ️  Nenhuma leitura encontrada no Firebase');
+        if (dados != null) {
+          final leitura = Leitura.fromFirebase(dados, 'atual');
+          _leituras.add(leitura);
         }
-      } else {
-        print('❌ Erro ao carregar do Firebase: ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Erro de conexão com Firebase: $e');
+      print('❌ Erro ao carregar dados atuais: $e');
+    }
+  }
+
+  Future<void> _carregarHistoricoLeituras() async {
+    try {
+      final List<String> caminhosPossiveis = [
+        '/leituras.json',
+        '/monitor/leituras.json',
+      ];
+
+      int leiturasCarregadas = 0;
+
+      for (final caminho in caminhosPossiveis) {
+        try {
+          final url = Uri.https(_baseUrl, caminho);
+          final response = await http.get(url);
+
+          if (response.statusCode == 200) {
+            final historicoData = json.decode(response.body);
+
+            if (historicoData != null && historicoData is Map) {
+              historicoData.forEach((key, value) {
+                if (value is Map) {
+                  final Map<String, dynamic> valueAsStringMap = {};
+                  value.forEach((k, v) {
+                    valueAsStringMap[k.toString()] = v;
+                  });
+
+                  final leitura =
+                      Leitura.fromFirebase(valueAsStringMap, key.toString());
+                  _leituras.add(leitura);
+                  leiturasCarregadas++;
+                }
+              });
+
+              if (leiturasCarregadas > 0) {
+                print('✅ $leiturasCarregadas leituras históricas carregadas');
+                _leituras.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          // Continua para o próximo caminho
+        }
+      }
+
+      if (leiturasCarregadas == 0) {
+        print('ℹ️  Nenhuma leitura histórica encontrada');
+      }
+    } catch (e) {
+      print('❌ Erro ao carregar histórico de leituras: $e');
     }
   }
 
@@ -163,13 +212,8 @@ class Menu {
         for (var row in resultados) {
           var dados = row.toList();
           if (dados.length >= 3) {
-            _sensores.add(SensorSCT013(
-                _safeInt(dados[0]),
-                _safeString(dados[1]),
-                _safeString(dados[2]),
-                30.0, // fator calibração padrão
-                2.5 // tensão referência padrão
-                ));
+            _sensores.add(SensorSCT013(_safeInt(dados[0]),
+                _safeString(dados[1]), _safeString(dados[2]), 30.0, 2.5));
           }
         }
       } catch (e) {
@@ -213,14 +257,14 @@ class Menu {
     return 0;
   }
 
-/* double _safeDouble(dynamic value) {
+  double _safeDouble(dynamic value) {
     if (value == null) return 0.0;
     if (value is double) return value;
     if (value is int) return value.toDouble();
     if (value is String) return double.tryParse(value) ?? 0.0;
     return 0.0;
-    }
-*/
+  }
+
   String _safeString(dynamic value) {
     if (value == null) return '';
     if (value is String) return value;
@@ -574,7 +618,7 @@ class Menu {
     if (_leituras.isNotEmpty) {
       final ultimaLeitura = _leituras.last;
       print(
-          '   • Última: ${ultimaLeitura.potencia.toStringAsFixed(1)}W - ${ultimaLeitura.consumoKwh.toStringAsFixed(3)}kWh - R\$${ultimaLeitura.custo.toStringAsFixed(2)}');
+          '   • Última: ${ultimaLeitura.potencia.toStringAsFixed(1)}W - ${ultimaLeitura.corrente.toStringAsFixed(3)}A - ${ultimaLeitura.consumoKwh.toStringAsFixed(6)}kWh');
     }
     print('═' * 50);
   }
@@ -595,7 +639,7 @@ class Menu {
     print('\n🏠 LISTA DE LOCAIS');
     print('═' * 50);
     if (_locais.isEmpty) {
-      print('📭 Nenhum local cadastrado');
+      print('📭 Nenhum local cadastrada');
     } else {
       for (var local in _locais) {
         local.exibirDados();
@@ -652,44 +696,6 @@ class Menu {
   }
 
   // ========== MÉTODOS ESPECÍFICOS DO POWERKEEPER ==========
-  void _realizarMedicaoSensor() {
-    print('\n🔌 REALIZAR MEDIÇÃO COM SENSOR');
-    print('═' * 50);
-
-    if (_sensores.isEmpty) {
-      print('❌ Nenhum sensor cadastrado');
-      return;
-    }
-
-    print('📋 Sensores disponíveis:');
-    for (int i = 0; i < _sensores.length; i++) {
-      print('${i + 1} - ${_sensores[i].tipo}');
-    }
-
-    stdout.write('Selecione o sensor (1-${_sensores.length}): ');
-    final input = stdin.readLineSync()?.trim();
-    final sensorIndex = int.tryParse(input ?? '');
-
-    if (sensorIndex == null ||
-        sensorIndex < 1 ||
-        sensorIndex > _sensores.length) {
-      print('❌ Sensor inválido!');
-      return;
-    }
-
-    final sensor = _sensores[sensorIndex - 1];
-
-    stdout.write('Tensão da rede (V): ');
-    final tensaoRede =
-        double.tryParse(stdin.readLineSync()?.trim() ?? '127.0') ?? 127.0;
-
-    stdout.write('Tarifa de energia (R\$/kWh): ');
-    final tarifa =
-        double.tryParse(stdin.readLineSync()?.trim() ?? '0.75') ?? 0.75;
-
-    sensor.realizarMedicaoCompleta(tensaoRede, tarifa);
-  }
-
   void _calcularEconomia() {
     print('\n💰 CALCULAR ECONOMIA DE ENERGIA');
     print('═' * 50);
@@ -714,7 +720,6 @@ class Menu {
     print('📈 Número de medições: ${_leituras.length}');
     print('─' * 40);
 
-    // Sugestões de economia
     if (potenciaMedia > 1000) {
       print('💡 SUGESTÃO: Considere otimizar equipamentos de alto consumo');
     }
@@ -827,10 +832,10 @@ class Menu {
       print('11  - 👤 Listar Usuários');
       print('═' * 60);
       print('⚡ ENERGIA & MEDIÇÕES:');
-      print('12 - 🔌 Realizar Medição com Sensor');
-      print('13 - 📊 Listar Todas as Leituras');
-      print('14 - 💰 Calcular Economia');
-      print('15 - 📤 Enviar Leituras para MySQL');
+      print('12 - 📊 Listar Todas as Leituras');
+      print('13 - 💰 Calcular Economia');
+      print('14 - 📤 Enviar Leituras para MySQL');
+      print('15 - 🔄 Recarregar Dados do Firebase');
       print('═' * 60);
 
       stdout.write('👉 Escolha: ');
@@ -871,16 +876,17 @@ class Menu {
           _listarUsuarios();
           break;
         case '12':
-          _realizarMedicaoSensor();
-          break;
-        case '13':
           _listarLeituras();
           break;
-        case '14':
+        case '13':
           _calcularEconomia();
           break;
-        case '15':
+        case '14':
           await _enviarLeiturasParaMySQL();
+          break;
+        case '15':
+          print('\n🔄 RECARREGANDO DADOS DO FIREBASE...');
+          await _carregarLeiturasFirebase();
           break;
         case '0':
           await dbConnection.close();
