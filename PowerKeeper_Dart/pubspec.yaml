@@ -1,0 +1,13 @@
+name: powerkeeper
+description: Sistema PowerKeeper - Monitoramento de Consumo de Energia
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  mysql1: ^0.20.0
+  http: ^1.1.0
+  
+dev_dependencies:
+  lints: ^3.0.0
+  test: ^1.24.0
